@@ -1,64 +1,121 @@
+from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+import pandas as pd
 from sklearn.impute import SimpleImputer
 import numpy as np
 from flask import Blueprint, jsonify, request
+from sklearn.metrics import accuracy_score, mean_squared_error, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
+
+from SRC.logics_regix import get_numeric_value
 from models import ImportDataDetail
+from sklearn.metrics import accuracy_score
 
 logistic_regression = Blueprint("logistic_regression", __name__, url_prefix="/api/v1/algo")
 
-@logistic_regression.route('/logistic/', methods=['GET'])
+@logistic_regression.route('/logistic', methods=['POST'])
 def apply_logistic_regression():
-    id = request.args.get('id')
-    if not id:
-        return jsonify({'message': 'Please provide an ID parameter'}), 400
+    id = request.args.get('_id')
+    key_value = request.json
 
+    if not id or not key_value:
+        return jsonify({'message': 'Please provide both id and key-value pairs'}), 400
+    new_data = pd.DataFrame([key_value])
+    # Fetch data from the database based on the provided criteria
     data = ImportDataDetail.query.filter_by(importId=id).all()
     if not data:
-        return jsonify({'message': 'No data found for the provided ID'}), 404
+        return jsonify({'message': 'No data found for the provided criteria'}), 404
+    cleaned_data = [item for item in data if
+                    all(getattr(item, attr) is not None for attr in dir(item) if not attr.startswith('_'))]
+    df = pd.DataFrame([
+        (
+            int(float(get_numeric_value(item.age))) if not pd.isna(get_numeric_value(item.age)) else None,
+            float(get_numeric_value(item.bp)) if not pd.isna(get_numeric_value(item.bp)) else None,
+            float(get_numeric_value(item.sg)) if not pd.isna(get_numeric_value(item.sg)) else None,
+            float(get_numeric_value(item.al)) if not pd.isna(get_numeric_value(item.al)) else None,
+            float(get_numeric_value(item.su)) if not pd.isna(get_numeric_value(item.su)) else None,
+            float(get_numeric_value(item.bgr)) if not pd.isna(get_numeric_value(item.bgr)) else None,
+            float(get_numeric_value(item.bu)) if not pd.isna(get_numeric_value(item.bu)) else None,
+            float(get_numeric_value(item.sc)) if not pd.isna(get_numeric_value(item.sc)) else None,
+            float(get_numeric_value(item.sod)) if not pd.isna(get_numeric_value(item.sod)) else None,
+            float(get_numeric_value(item.pot)) if not pd.isna(get_numeric_value(item.pot)) else None,
+            float(get_numeric_value(item.hemo)) if not pd.isna(get_numeric_value(item.hemo)) else None,
+            float(get_numeric_value(item.pcv)) if not pd.isna(get_numeric_value(item.pcv)) else None,
+            float(get_numeric_value(item.wc)) if not pd.isna(get_numeric_value(item.wc)) else None,
+            float(get_numeric_value(item.rc)) if not pd.isna(get_numeric_value(item.rc)) else None,
+            str(item.rbc),
+            str(item.pc),
+            str(item.pcc),
+            str(item.ba),
+            str(item.htn),
+            str(item.dm),
+            str(item.cad),
+            str(item.appet),
+            str(item.pe),
+            str(item.ane),
+            1 if str(item.classification) == 'ckd' else 0
+        ) for item in cleaned_data
+    ], columns=['age', 'bp', 'sg', 'al', 'su', 'bgr', 'bu', 'sc', 'sod', 'pot', 'hemo', 'pcv', 'wc', 'rc', 'rbc', 'pc',
+                'pcc', 'ba', 'htn', 'dm', 'cad', 'appet', 'pe', 'ane', 'classification'])
 
-    features = ['age', 'bp', 'sg', 'al', 'su', 'rbc', 'pc', 'pcc', 'ba', 'bgr', 'bu', 'sc', 'sod', 'pot', 'hemo',
-                'pcv', 'wc', 'rc', 'htn', 'dm', 'cad', 'appet', 'pe', 'ane']
-    target = 'classification'
+    target_column = 'classification'
+    X = df.drop(columns=[target_column])  # Features (excluding the target)
+    y = df[target_column]
 
-    label_encoder = LabelEncoder()
-    y = label_encoder.fit_transform([getattr(item, target) for item in data])
+    # Define categorical columns
+    categorical_columns = ['rbc', 'pc', 'pcc', 'ba', 'htn', 'dm', 'cad', 'appet', 'pe',
+                           'ane']  # Update with your categorical columns
 
-    categorical_features = ['rbc', 'pc', 'pcc', 'ba', 'htn', 'dm', 'cad', 'appet', 'pe', 'ane']
-    for feature in categorical_features:
-        encoded_values = label_encoder.fit_transform([getattr(item, feature) for item in data])
-        for index, item in enumerate(data):
-            setattr(item, feature, encoded_values[index])
+    # Define a ColumnTransformer for preprocessing
+    numeric_features = [col for col in X.columns if col not in categorical_columns]
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_columns),
+            ('num', SimpleImputer(strategy='mean'), numeric_features)
+        ],
+        remainder='passthrough'  # Include remaining columns as they are
+    )
 
-    # Convert all values to float except non-numeric values
-    X = []
-    for item in data:
-        row = []
-        for feature in features:
-            value = getattr(item, feature)
-            try:
-                row.append(float(value))
-            except ValueError:
-                row.append(np.nan)  # Replace non-numeric with np.nan
-        X.append(row)
+    # Define the Logistic Regression classifier
+    logistic_regression = LogisticRegression()
 
-    X = np.array(X, dtype=np.float64)  # Convert the whole array to float64
+    # Create a pipeline with preprocessing and Logistic Regression classifier
+    pipe = Pipeline([
+        ('preprocessor', preprocessor),
+        ('classifier', logistic_regression)
+    ])
 
-    imp_mean = SimpleImputer(strategy='mean')
-    X = imp_mean.fit_transform(X)
+    # Split the data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.8, random_state=5)
 
-    # Remove rows with NaN values
-    nan_indices = np.isnan(X).any(axis=1)
-    X = X[~nan_indices]
-    y = y[~nan_indices]
-    model = LogisticRegression()
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    model.fit(X_train, y_train)
-    # ... (Train-test split, model fitting, prediction, and accuracy calculation)
-    predictions = model.predict(X_test)
-    accuracy = model.score(X_test, y_test)
+    # Fit the pipeline on training data
+    pipe.fit(X_train, y_train)
+
+    # Predict using the pipeline
+    predictions = pipe.predict(X_test)
+
+    # Calculate accuracy and other metrics
+    accuracy = round(accuracy_score(y_test, predictions), 3)
+    r2 = round(r2_score(y_test, predictions), 3)
+    mae = round(mean_absolute_error(y_test, predictions), 3)
+    rmse = round(np.sqrt(mean_squared_error(y_test, predictions)), 3)
+    new_predictions = pipe.predict(new_data)
+    f1 = round(f1_score(y_test, predictions), 3)
+    micro = round(precision_score(y_test, predictions, average='micro'), 3)
+    macro = round(recall_score(y_test, predictions, average='macro'), 3)
+    #auc_score = round(roc_auc_score(y_test, np.zeros(len(y_test))), 3)
     return jsonify({
-        'predictions': predictions.tolist(),
-        'accuracy': accuracy
-    }), 200
+        'Prediction': new_predictions.tolist(),
+        'Accuracy': float(accuracy),
+        'R2 Score': float(r2),
+        'MAE': float(mae),
+        'RMSE': float(rmse),
+        'F1 Score': float(f1),
+        'Micro': float(micro),
+        'Macro': float(macro)
+        #'AUC': auc_score
+    })

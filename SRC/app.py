@@ -7,13 +7,15 @@ from SRC.knn import knn
 from SRC.logistic_regression import logistic_regression
 from SRC.xgboost_class import xgboost_class
 from SRC.catboost_class import catboost_class
+from SRC.eda import eda
+
 from models import db
 
 app = Flask(__name__)
 CORS(app)
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
-app.config['SQLALCHEMY_DATABASE_URI'] = "mssql+pymssql://sa:123qwe@127.0.0.1/bookmark"
+app.config['SQLALCHEMY_DATABASE_URI'] = "mssql+pymssql://sa:123qwe@127.0.0.1/CKD_db"
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -29,7 +31,9 @@ app.register_blueprint(file_import)
 app.register_blueprint(knn)
 app.register_blueprint(logistic_regression)
 app.register_blueprint(xgboost_class)
-app.register_blueprint(catboost_class   )
+app.register_blueprint(catboost_class)
+app.register_blueprint(eda)
+
 
 if __name__ == '__main__':
     app.run(debug=True)

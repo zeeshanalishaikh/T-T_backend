@@ -1,5 +1,6 @@
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import DateTime
 from sqlalchemy.sql import func
 
 db = SQLAlchemy()
@@ -9,8 +10,7 @@ class ImportData(db.Model):
     Name = db.Column(db.String(100), nullable=False)
     TotalRecords = db.Column(db.Integer, nullable=False)
     AfterNanRecords = db.Column(db.Integer, nullable=False)
-    created_at = db.Column(db.DateTime(timezone=True),
-                           server_default=func.now())
+    created_at = db.Column(DateTime, nullable=False, server_default=func.now())
     import_data_details = db.relationship('ImportDataDetail', backref='import_data')
 
     def __repr__(self):
@@ -44,8 +44,7 @@ class ImportDataDetail(db.Model):
     ane = db.Column(db.String(100), nullable=True)
     classification = db.Column(db.String(100), nullable=True)
     importId = db.Column(db.Integer, db.ForeignKey('import_data.id'))
-    created_at = db.Column(db.DateTime(timezone=True),
-                           server_default=func.now())
+    created_at = db.Column(DateTime, nullable=False, server_default=func.now())
 
     def __repr__(self):
         return f'<ImportDataDetail {self.age}>'

@@ -1,12 +1,11 @@
 import datetime
 
-from flask import request
-from flask import Blueprint
+from flask import request, Blueprint, jsonify
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import sessionmaker
 from models import ImportData, ImportDataDetail, db
-from flask import jsonify
+
 
 file_import = Blueprint("file_import", __name__, url_prefix="/api/v1/file")
 
@@ -17,13 +16,19 @@ def file_import_post():
     if data and 'fileName' in data:
         fileName = data['fileName']
     csv_file_path = 'D:\\Unidata\T&T\dataframe\\'+fileName
-    data_from_csv = pd.read_csv(csv_file_path)
+    try:
+        data_from_csv = pd.read_csv(csv_file_path)
+    except FileNotFoundError:
+        return jsonify({'error': f'File "{fileName}"  is incorrect'}), 500
+    except pd.errors.ParserError:
+        return jsonify({'error': f'Error parsing the CSV file at "{fileName}"'}), 400
+
     cleaned_data = data_from_csv.dropna()
-    engine = create_engine('mssql+pymssql://sa:123qwe@127.0.0.1/bookmark')
+    engine = create_engine('mssql+pymssql://sa:123qwe@127.0.0.1/CKD_db')
     Session = sessionmaker(bind=engine)
     session = Session()
     import_data_row = ImportData(
-        Name='file.csv',
+        Name=fileName,
         TotalRecords=len(data_from_csv),
         AfterNanRecords=len(cleaned_data),
     )
@@ -61,22 +66,37 @@ def file_import_post():
         session.add(import_data_detail_row)
     session.commit()
     session.close()
-    return "Successfully File Imported"
-
-@file_import.route('/result/', methods=['GET'])
+    return jsonify({'message' : 'Successfully imported'}), 200
+@file_import.route('/result/data', methods=['GET'])
 def file_import_get():
+    list = ImportData.query.order_by(desc(ImportData.id)).all()
+    if not list:
+        return jsonify({'message': 'No data found for the provided ID'}), 404
+    data_list = []
+    for item in list:
+        data_list.append({
+            'id': item.id.decode('utf-8') if isinstance(item.id, bytes) else item.id,
+            'Name': item.Name.decode('utf-8') if isinstance(item.Name, bytes) else item.Name,
+            'TotalRecords': item.TotalRecords.decode('utf-8') if isinstance(item.TotalRecords, bytes) else item.TotalRecords,
+            'AfterNanRecords': item.AfterNanRecords.decode('utf-8') if isinstance(item.AfterNanRecords, bytes) else item.AfterNanRecords,
+            'created_at': item.created_at.strftime("%Y-%m-%d %H:%M:%S") if isinstance(item.created_at, datetime.datetime) else (
+        item.created_at.decode('utf-8', 'replace') if isinstance(item.created_at, bytes) else str(item.created_at)
+    ) if hasattr(item, 'created_at') and item.created_at is not None else None,
+        })
+    return jsonify(data_list), 200
+@file_import.route('/result/datadetail', methods=['GET'])
+def file_import_detail_get():
     id = request.args.get('id')
     if not id:
         return jsonify({'message': 'Please provide an ID parameter'}), 400
     # Top 10 records
-    top_10 = ImportDataDetail.query.filter_by(importId=id).order_by(ImportDataDetail.id.asc()).limit(10).all()
+    #top_10 = ImportDataDetail.query.filter_by(importId=id).order_by(ImportDataDetail.id.asc()).limit(10).all()
 
     # Bottom 10 records
-    bottom_10 = ImportDataDetail.query.filter_by(importId=id).order_by(ImportDataDetail.id.desc()).limit(10).all()
+    bottom_20 = ImportDataDetail.query.filter_by(importId=id).order_by(ImportDataDetail.id.desc()).limit(20).all()
 
     # Merging both lists
-    merged_list = top_10 + bottom_10
-
+    merged_list =  bottom_20 # + top_10
     if not merged_list:
         return jsonify({'message': 'No data found for the provided ID'}), 404
     data_list = []
